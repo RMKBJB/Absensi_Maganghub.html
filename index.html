@@ -426,17 +426,20 @@
         btn.innerHTML = "⏳ Mengirim data...";
         btn.disabled = true;
 
-        // 3. Fungsi Pengiriman ke Google Sheets
+        // 3. Fungsi Pengiriman ke Google Sheets (Diperbarui agar lebih stabil)
         const kirimKeDatabase = (finalPayload) => {
-            // ---> GANTI URL DI BAWAH INI DENGAN URL APPS SCRIPT ANDA <---
             const APPS_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycby0cEMzs2mz7uzTiQgeahmroFKeXwF5Laz0tgpWHW_-GJtwxYLlUxNrH_c1oUId699g/exec'; 
             
             fetch(APPS_SCRIPT_URL, {
                 method: 'POST',
+                mode: 'no-cors', // <--- PENTING: Mencegah bentrok CORS browser dengan Google Script
+                headers: {
+                    'Content-Type': 'application/json',
+                },
                 body: JSON.stringify(finalPayload)
             })
-            .then(res => res.json())
-            .then(resData => {
+            .then(() => {
+                // Karena menggunakan mode 'no-cors', kita asumsikan sukses jika fetch berhasil dikirim
                 if (jenis === 'PAGI') {
                     localStorage.setItem('waktu_masuk', nowMs.toString());
                     showToast("Absen Pagi berhasil dicatat!");
@@ -448,6 +451,7 @@
                 updateClockAndUI();
             })
             .catch(err => {
+                console.error("Error detail:", err);
                 showToast("Gagal mengirim data! Periksa koneksi internet.", "❌");
                 updateClockAndUI();
             });
