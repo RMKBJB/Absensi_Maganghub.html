@@ -158,7 +158,7 @@
     </div>
 
     <div id="timer-block" class="hidden glass-panel rounded-2xl p-4 text-center mb-6">
-        <p class="text-xs font-bold text-gray-600 uppercase tracking-wider mb-1">Durasi Kerja Hari Ini</p>
+        <p class="text-xs font-bold text-gray-600 uppercase tracking-wider mb-1">Durasi Magang Hari Ini</p>
         <p class="text-3xl font-black text-purple-700 tabular-nums drop-shadow-sm" id="timer-text">00:00:00</p>
     </div>
 
@@ -281,13 +281,13 @@
 
         if (isPagiWindow) {
             if (!waktuMasuk) {
-                setupButton(btn, "☀️ Rekam Absen Pagi", "bg-gradient-to-r from-blue-500 to-cyan-400 text-white shadow-xl shadow-blue-500/40 border border-white/40", false, "PAGI");
+                setupButton(btn, "☀️ Rekam Absen Datang", "bg-gradient-to-r from-blue-500 to-cyan-400 text-white shadow-xl shadow-blue-500/40 border border-white/40", false, "PAGI");
             } else {
-                setupButton(btn, "🔒 Tunggu Sesi Pulang (12:01)", "glass-panel text-gray-500", true, null);
+                setupButton(btn, "🔒 Tunggu Waktunya Pulang", "glass-panel text-gray-500", true, null);
             }
         } else {
             if (waktuPulang) {
-                setupButton(btn, "🎉 Good Job... Saatnya Kita Pulang!", "bg-emerald-500 text-white shadow-xl shadow-emerald-500/40 border border-white/40", true, null);
+                setupButton(btn, "🎉 Good Job! Yuk Kita Pulang.. ", "bg-emerald-500 text-white shadow-xl shadow-emerald-500/40 border border-white/40", true, null);
             } else if (waktuMasuk) {
                 const diff = now.getTime() - parseInt(waktuMasuk);
                 if (diff >= MIN_WORK_MS) {
