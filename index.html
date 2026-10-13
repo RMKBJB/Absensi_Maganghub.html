@@ -95,6 +95,28 @@
     </div>
 </div>
 
+<!-- MODAL KAMERA: AKTIF HANYA SAAT FOTO ABSENSI -->
+<div id="camera-modal" class="fixed inset-0 z-[60] flex items-center justify-center px-4 py-6 opacity-0 pointer-events-none transition-opacity duration-300 bg-gray-900/80 backdrop-blur-md">
+    <div class="glass-panel rounded-[28px] p-5 w-full max-w-sm">
+        <div class="text-center mb-4">
+            <div class="text-3xl mb-2">📸</div>
+            <h2 class="text-xl font-extrabold text-gray-800" id="camera-modal-title">Foto Absensi</h2>
+            <p class="text-xs text-gray-600 mt-1" id="camera-modal-help">Pastikan wajah terlihat jelas sebelum mengambil foto.</p>
+        </div>
+        <div class="relative w-full overflow-hidden rounded-2xl bg-gray-950" style="aspect-ratio: 3/4;">
+            <video id="camera-stream" autoplay playsinline muted class="w-full h-full object-cover" style="transform:scaleX(-1);"></video>
+            <img id="captured-preview" alt="Pratinjau foto absensi" class="hidden w-full h-full object-cover" />
+        </div>
+        <p id="camera-status" class="text-xs text-center text-gray-600 mt-3 mb-4">Kamera akan aktif hanya selama proses foto.</p>
+        <div class="flex gap-2">
+            <button id="btn-camera-cancel" onclick="cancelCameraFlow()" class="flex-1 py-3 px-3 rounded-xl font-bold text-gray-600 bg-white/60">Batal</button>
+            <button id="btn-camera-capture" onclick="takeAttendancePhoto()" class="flex-1 py-3 px-3 rounded-xl font-bold text-white bg-gradient-to-r from-blue-600 to-cyan-500">Ambil Foto</button>
+            <button id="btn-camera-retake" onclick="retakeAttendancePhoto()" class="hidden flex-1 py-3 px-3 rounded-xl font-bold text-gray-700 bg-white/70">Foto Ulang</button>
+            <button id="btn-camera-use" onclick="useAttendancePhoto()" class="hidden flex-1 py-3 px-3 rounded-xl font-bold text-white bg-gradient-to-r from-emerald-600 to-teal-500">Gunakan Foto</button>
+        </div>
+    </div>
+</div>
+
 <!-- ========================================== -->
 <!-- MODAL 2: RINGKASAN AKTIVITAS & UPLOAD      -->
 <!-- ========================================== -->
@@ -118,7 +140,7 @@
         
         <div class="flex gap-3">
             <button onclick="closeModal()" class="flex-1 py-3 px-4 rounded-xl font-bold text-gray-600 bg-white/40 hover:bg-white/60 transition-colors">Batal</button>
-            <button onclick="submitPulang()" class="flex-1 py-3 px-4 rounded-xl font-bold text-white bg-gradient-to-r from-purple-600 to-pink-500 shadow-lg shadow-purple-500/30 hover:opacity-90 transition-opacity">Kirim & Pulang</button>
+            <button id="btn-submit-pulang" onclick="submitPulang()" class="flex-1 py-3 px-4 rounded-xl font-bold text-white bg-gradient-to-r from-purple-600 to-pink-500 shadow-lg shadow-purple-500/30 hover:opacity-90 transition-opacity">Kirim & Pulang</button>
         </div>
     </div>
 </div>
@@ -141,8 +163,10 @@
     </div>
 
     <div class="glass-panel rounded-[32px] p-4 mb-6 relative">
-        <div id="video-container" class="mb-4">
-            <video id="camera-stream" autoplay playsinline muted></video>
+        <div id="video-container" class="mb-4 flex flex-col items-center justify-center text-center px-6 text-white" style="aspect-ratio: 3/2; background:linear-gradient(135deg,#172554,#334155);">
+            <div class="text-4xl mb-3">📷</div>
+            <p class="font-bold text-sm">Kamera dalam keadaan mati</p>
+            <p class="text-xs text-white/75 mt-1">Kamera hanya aktif saat Anda akan mengambil foto absensi.</p>
         </div>
         
         <div class="flex justify-between items-end px-2">
@@ -173,12 +197,16 @@
 <script>
     const MIN_WORK_MS = 15000; 
     let userLocation = null;
+    // Lock transaksi untuk mencegah double-click / pengiriman absensi berulang
+    let attendanceProcessing = false;
+    let activeCameraStream = null;
+    let pendingAttendance = null;
+    let capturedAttendancePhoto = null;
 
     function initialize() {
         cekIdentitasAwal(); 
         setInterval(updateClockAndUI, 1000);
         updateClockAndUI();
-        startCamera();
         getLocation();
     }
 
@@ -262,6 +290,13 @@
         const timerText = document.getElementById('timer-text');
         const btn = document.getElementById('btn-action');
 
+        // Selama transaksi berlangsung, jangan biarkan renderUI mengaktifkan kembali tombol.
+        // updateClockAndUI() dipanggil setiap detik, sehingga lock harus diperiksa di sini.
+        if (attendanceProcessing) {
+            setupProcessingButton(btn);
+            return;
+        }
+
         if (isPagiWindow) {
             statusBadge.innerHTML = '<span class="bg-blue-500/20 text-blue-700 px-3 py-1.5 rounded-xl text-xs font-bold shadow-sm backdrop-blur-md border border-blue-200 flex items-center gap-1">☀️ Sesi Pagi</span>';
         } else {
@@ -302,7 +337,20 @@
         }
     }
 
+    function setupProcessingButton(btn) {
+        btn.className = 'w-full font-extrabold py-4 px-6 rounded-2xl flex justify-center items-center gap-3 text-lg backdrop-blur-md bg-gray-500 text-white shadow-lg opacity-80 cursor-not-allowed';
+        btn.innerHTML = '<span class="animate-spin inline-block">⏳</span> Sedang mengirim absensi...';
+        btn.disabled = true;
+        btn.onclick = null;
+    }
+
     function setupButton(btn, text, classes, disabled, actionType) {
+        // Safety guard: jangan pernah mengaktifkan kembali tombol saat transaksi masih berjalan.
+        if (attendanceProcessing) {
+            setupProcessingButton(btn);
+            return;
+        }
+
         btn.className = `w-full font-extrabold py-4 px-6 rounded-2xl transition-all duration-300 flex justify-center items-center gap-2 text-lg backdrop-blur-md ${classes}`;
         btn.innerHTML = text;
         btn.disabled = disabled;
@@ -315,9 +363,11 @@
             btn.classList.remove('opacity-70', 'cursor-not-allowed');
             btn.classList.add('hover:scale-[1.02]', 'active:scale-95');
             btn.onclick = () => {
+                // Proteksi tambahan terhadap double-click / tap berulang.
+                if (attendanceProcessing) return;
                 if(!localStorage.getItem('nama_peserta')) { cekIdentitasAwal(); return; }
                 if(actionType === 'PULANG') openModal();
-                else eksekusiAbsensi('PAGI', null, null);
+                else beginCameraFlow({ jenis: 'PAGI', catatan: null, fileBukti: null, returnToSummary: false });
             };
         }
     }
@@ -357,6 +407,9 @@
     }
 
     function submitPulang() {
+        // Cegah submit berulang sebelum proses sebelumnya selesai.
+        if (attendanceProcessing) return;
+
         const activity = document.getElementById('activity-text').value;
         const fileInput = document.getElementById('evidence-upload');
         
@@ -367,16 +420,160 @@
         }
         
         const evidenceFile = fileInput.files.length > 0 ? fileInput.files[0] : null;
-        closeModal();
-        eksekusiAbsensi('PULANG', activity, evidenceFile);
+
+        // Ambil foto dan beri kesempatan pengguna meninjau / mengulang sebelum dikirim.
+        beginCameraFlow({ jenis: 'PULANG', catatan: activity, fileBukti: evidenceFile, returnToSummary: true });
+    }
+
+    function setPulangModalProcessing(isProcessing) {
+        const submitBtn = document.getElementById('btn-submit-pulang');
+        const cancelBtn = document.querySelector('#summary-modal button[onclick="closeModal()"]');
+
+        if (submitBtn) {
+            submitBtn.disabled = isProcessing;
+            submitBtn.innerHTML = isProcessing
+                ? '<span class="animate-spin inline-block">⏳</span> Mengirim...'
+                : 'Kirim & Pulang';
+            submitBtn.classList.toggle('opacity-60', isProcessing);
+            submitBtn.classList.toggle('cursor-not-allowed', isProcessing);
+        }
+
+        if (cancelBtn) {
+            cancelBtn.disabled = isProcessing;
+            cancelBtn.classList.toggle('opacity-50', isProcessing);
+            cancelBtn.classList.toggle('cursor-not-allowed', isProcessing);
+        }
+    }
+
+    function showCameraModal() {
+        const modal = document.getElementById('camera-modal');
+        modal.classList.remove('opacity-0', 'pointer-events-none');
+    }
+
+    function hideCameraModal() {
+        const modal = document.getElementById('camera-modal');
+        modal.classList.add('opacity-0', 'pointer-events-none');
+    }
+
+    function stopCamera() {
+        if (activeCameraStream) {
+            activeCameraStream.getTracks().forEach(track => track.stop());
+            activeCameraStream = null;
+        }
+        const video = document.getElementById('camera-stream');
+        if (video) video.srcObject = null;
     }
 
     async function startCamera() {
         const video = document.getElementById('camera-stream');
+        const status = document.getElementById('camera-status');
         try {
-            const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user' } });
-            video.srcObject = stream;
-        } catch (err) { showToast("Akses kamera ditolak!", "⚠️"); }
+            if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+                throw new Error('Browser tidak mendukung akses kamera.');
+            }
+            stopCamera();
+            activeCameraStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user' }, audio: false });
+            video.srcObject = activeCameraStream;
+            video.classList.remove('hidden');
+            document.getElementById('captured-preview').classList.add('hidden');
+            await video.play();
+            status.innerText = 'Posisikan wajah Anda, lalu tekan Ambil Foto.';
+            return true;
+        } catch (err) {
+            console.error('Akses kamera gagal:', err);
+            status.innerText = 'Kamera tidak dapat diakses. Periksa izin kamera dan coba lagi.';
+            showToast('Akses kamera gagal. Pastikan izin kamera aktif.', '⚠️');
+            stopCamera();
+            return false;
+        }
+    }
+
+    async function beginCameraFlow(data) {
+        if (attendanceProcessing) return;
+        if (!userLocation) {
+            showToast('Lokasi belum ditemukan!', '📡');
+            return;
+        }
+        pendingAttendance = data;
+        capturedAttendancePhoto = null;
+        document.getElementById('camera-modal-title').innerText = data.jenis === 'PULANG' ? 'Foto Absen Pulang' : 'Foto Absen Datang';
+        document.getElementById('camera-modal-help').innerText = 'Periksa posisi dan kejelasan wajah. Anda bisa mengulang foto sebelum mengirim.';
+        document.getElementById('btn-camera-capture').classList.remove('hidden');
+        document.getElementById('btn-camera-retake').classList.add('hidden');
+        document.getElementById('btn-camera-use').classList.add('hidden');
+        document.getElementById('btn-camera-cancel').disabled = false;
+        showCameraModal();
+        await startCamera();
+    }
+
+    function takeAttendancePhoto() {
+        const video = document.getElementById('camera-stream');
+        const canvas = document.getElementById('canvas');
+        if (!video.videoWidth || !video.videoHeight) {
+            showToast('Kamera belum siap. Tunggu sebentar lalu coba lagi.', '⚠️');
+            return;
+        }
+        canvas.width = video.videoWidth;
+        canvas.height = video.videoHeight;
+        const context = canvas.getContext('2d');
+        context.setTransform(1, 0, 0, 1, 0, 0);
+        context.translate(canvas.width, 0);
+        context.scale(-1, 1);
+        context.drawImage(video, 0, 0, canvas.width, canvas.height);
+        capturedAttendancePhoto = canvas.toDataURL('image/jpeg', 0.85);
+        const preview = document.getElementById('captured-preview');
+        preview.src = capturedAttendancePhoto;
+        preview.classList.remove('hidden');
+        video.classList.add('hidden');
+        stopCamera();
+        document.getElementById('camera-status').innerText = 'Periksa foto Anda. Pilih Foto Ulang jika belum jelas, atau Gunakan Foto untuk melanjutkan.';
+        document.getElementById('btn-camera-capture').classList.add('hidden');
+        document.getElementById('btn-camera-retake').classList.remove('hidden');
+        document.getElementById('btn-camera-use').classList.remove('hidden');
+    }
+
+    async function retakeAttendancePhoto() {
+        capturedAttendancePhoto = null;
+        document.getElementById('captured-preview').classList.add('hidden');
+        document.getElementById('btn-camera-retake').classList.add('hidden');
+        document.getElementById('btn-camera-use').classList.add('hidden');
+        document.getElementById('btn-camera-capture').classList.remove('hidden');
+        await startCamera();
+    }
+
+    function useAttendancePhoto() {
+        if (!capturedAttendancePhoto || !pendingAttendance) {
+            showToast('Silakan ambil foto terlebih dahulu.', '⚠️');
+            return;
+        }
+        const data = pendingAttendance;
+        const foto = capturedAttendancePhoto;
+        pendingAttendance = null;
+        hideCameraModal();
+        stopCamera();
+        document.getElementById('camera-stream').classList.remove('hidden');
+        document.getElementById('captured-preview').classList.add('hidden');
+        if (data.returnToSummary) {
+            closeModal();
+        }
+        eksekusiAbsensi(data.jenis, data.catatan, data.fileBukti, foto);
+        capturedAttendancePhoto = null;
+    }
+
+    function cancelCameraFlow() {
+        const data = pendingAttendance;
+        pendingAttendance = null;
+        capturedAttendancePhoto = null;
+        stopCamera();
+        hideCameraModal();
+        document.getElementById('camera-stream').classList.remove('hidden');
+        document.getElementById('captured-preview').classList.add('hidden');
+        if (data && data.returnToSummary) {
+            // Laporan tetap terbuka agar pengguna tidak kehilangan teks / lampiran.
+            const modal = document.getElementById('summary-modal');
+            modal.classList.remove('opacity-0', 'pointer-events-none');
+            setTimeout(() => document.getElementById('modal-content').classList.remove('scale-95'), 10);
+        }
     }
 
     function getLocation() {
@@ -392,81 +589,108 @@
         }
     }
 
-    function eksekusiAbsensi(jenis, catatan, fileBukti) {
-        if (!userLocation) { showToast("Lokasi belum ditemukan!", "📡"); return; }
+    function eksekusiAbsensi(jenis, catatan, fileBukti, fotoBase64) {
+        // Guard paling awal: satu sesi hanya boleh mempunyai satu transaksi aktif.
+        if (attendanceProcessing) return;
 
-        // 1. Ambil Foto Selfie dari Canvas dan jadikan Base64
-        const video = document.getElementById('camera-stream');
-        const canvas = document.getElementById('canvas');
-        const context = canvas.getContext('2d');
-        canvas.width = video.videoWidth; canvas.height = video.videoHeight;
-        context.translate(canvas.width, 0); context.scale(-1, 1);
-        context.drawImage(video, 0, 0, canvas.width, canvas.height);
-        
-        const fotoBase64 = canvas.toDataURL('image/jpeg', 0.8);
-        const nowMs = Date.now();
-        
-        // 2. Siapkan Data Payload
-        let payload = {
-            nama_peserta: localStorage.getItem('nama_peserta'),
-            nomor_magang: localStorage.getItem('nomor_magang'),
-            unit_kerja: localStorage.getItem('unit_kerja'),
-            waktu: new Date(nowMs).toLocaleString('id-ID'), // Format tanggal/jam rapi
-            jenis: jenis,
-            lokasi: userLocation,
-            catatan_aktivitas: catatan || null,
-            foto_base64: fotoBase64,
-            file_bukti_nama: fileBukti ? fileBukti.name : null,
-            file_bukti_base64: null,
-            file_bukti_mime: fileBukti ? fileBukti.type : null
-        };
-        
-        // Ganti tombol jadi loading
+        if (!userLocation) {
+            showToast("Lokasi belum ditemukan!", "📡");
+            return;
+        }
+
+        // Lock SEBELUM capture foto, pembuatan payload, FileReader, dan fetch.
+        attendanceProcessing = true;
         const btn = document.getElementById('btn-action');
-        btn.innerHTML = "⏳ Mengirim data...";
-        btn.disabled = true;
+        setupProcessingButton(btn);
 
-        // 3. Fungsi Pengiriman ke Google Sheets (Diperbarui agar lebih stabil)
-        const kirimKeDatabase = (finalPayload) => {
-            const APPS_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbxIk5Cj7egJMwb8uo_ofav723jxy-hzTFJtt9Ej2nw06lMQibfgmIb87YVnfDeKKM1I/exec'; 
+        try {
+            // Foto sudah ditinjau dan dikonfirmasi pengguna sebelum transaksi dimulai.
+            if (!fotoBase64) throw new Error('Foto absensi belum tersedia.');
+            const nowMs = Date.now();
             
-            fetch(APPS_SCRIPT_URL, {
-                method: 'POST',
-                mode: 'no-cors', // <--- PENTING: Mencegah bentrok CORS browser dengan Google Script
-                headers: {
-                    'Content-Type': 'application/json',
-                },
-                body: JSON.stringify(finalPayload)
-            })
-            .then(() => {
-                // Karena menggunakan mode 'no-cors', kita asumsikan sukses jika fetch berhasil dikirim
-                if (jenis === 'PAGI') {
-                    localStorage.setItem('waktu_masuk', nowMs.toString());
-                    showToast("Absen Pagi berhasil dicatat!");
-                } else {
-                    localStorage.setItem('waktu_pulang', nowMs.toString());
-                    showToast("Absen & Laporan terkirim. Selamat beristirahat!", "🎉");
-                }
-                if(navigator.vibrate) navigator.vibrate(50);
-                updateClockAndUI();
-            })
-            .catch(err => {
-                console.error("Error detail:", err);
-                showToast("Gagal mengirim data! Periksa koneksi internet.", "❌");
-                updateClockAndUI();
-            });
-        };
-
-        // 4. Proses File Bukti (jika ada) menjadi Base64 sebelum dikirim
-        if (fileBukti) {
-            const reader = new FileReader();
-            reader.onload = function(e) {
-                payload.file_bukti_base64 = e.target.result;
-                kirimKeDatabase(payload);
+            // 2. Siapkan Data Payload
+            let payload = {
+                nama_peserta: localStorage.getItem('nama_peserta'),
+                nomor_magang: localStorage.getItem('nomor_magang'),
+                unit_kerja: localStorage.getItem('unit_kerja'),
+                waktu: new Date(nowMs).toLocaleString('id-ID'),
+                jenis: jenis,
+                lokasi: userLocation,
+                catatan_aktivitas: catatan || null,
+                foto_base64: fotoBase64,
+                file_bukti_nama: fileBukti ? fileBukti.name : null,
+                file_bukti_base64: null,
+                file_bukti_mime: fileBukti ? fileBukti.type : null
             };
-            reader.readAsDataURL(fileBukti);
-        } else {
-            kirimKeDatabase(payload);
+            
+            // 3. Fungsi Pengiriman ke Google Sheets
+            const kirimKeDatabase = (finalPayload) => {
+                const APPS_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbxIk5Cj7egJMwb8uo_ofav723jxy-hzTFJtt9Ej2nw06lMQibfgmIb87YVnfDeKKM1I/exec'; 
+                
+                fetch(APPS_SCRIPT_URL, {
+                    method: 'POST',
+                    mode: 'no-cors',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify(finalPayload)
+                })
+                .then(() => {
+                    // Karena masih menggunakan no-cors, kita belum dapat membaca
+                    // response server. Completion fetch dianggap sebagai pengiriman.
+                    if (jenis === 'PAGI') {
+                        localStorage.setItem('waktu_masuk', nowMs.toString());
+                        showToast("Absen Pagi berhasil dicatat!");
+                    } else {
+                        localStorage.setItem('waktu_pulang', nowMs.toString());
+                        showToast("Absen & Laporan terkirim. Selamat beristirahat!", "🎉");
+                    }
+
+                    if(navigator.vibrate) navigator.vibrate(50);
+
+                    // Transaksi selesai. Lepaskan lock setelah state absensi disimpan.
+                    attendanceProcessing = false;
+                    setPulangModalProcessing(false);
+                    updateClockAndUI();
+                })
+                .catch(err => {
+                    console.error("Error detail:", err);
+                    showToast("Gagal mengirim data! Periksa koneksi internet.", "❌");
+
+                    // Hanya pada kegagalan lock dilepas agar pengguna dapat mencoba lagi.
+                    attendanceProcessing = false;
+                    setPulangModalProcessing(false);
+                    updateClockAndUI();
+                });
+            };
+
+            // 4. Proses File Bukti (jika ada) menjadi Base64 sebelum dikirim
+            if (fileBukti) {
+                const reader = new FileReader();
+
+                reader.onload = function(e) {
+                    payload.file_bukti_base64 = e.target.result;
+                    kirimKeDatabase(payload);
+                };
+
+                reader.onerror = function(err) {
+                    console.error("FileReader error:", err);
+                    showToast("Gagal membaca file bukti! Silakan coba lagi.", "❌");
+                    attendanceProcessing = false;
+                    setPulangModalProcessing(false);
+                    updateClockAndUI();
+                };
+
+                reader.readAsDataURL(fileBukti);
+            } else {
+                kirimKeDatabase(payload);
+            }
+        } catch (err) {
+            console.error("Proses absensi error:", err);
+            showToast("Absensi gagal diproses. Silakan coba lagi.", "❌");
+            attendanceProcessing = false;
+            setPulangModalProcessing(false);
+            updateClockAndUI();
         }
     }
 
